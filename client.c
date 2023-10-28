@@ -1,6 +1,7 @@
 #include "common.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +16,8 @@
 #define MAX_CMD_SIZE 2050
 
 int client_id = 0;
+
+pthread_t thread_handle;
 
 void set_operation_type(char line[MAX_CMD_SIZE], BlogOperation *operation) {
   char *command = strtok(line, " ");
@@ -53,14 +56,39 @@ void set_operation_type(char line[MAX_CMD_SIZE], BlogOperation *operation) {
   }
 }
 
+void *listen_to_messages(void *socket) {
+  int *client_socket = (int *)socket;
+
+  while (true) {
+    BlogOperation operation;
+    ssize_t bytes_received = recv(*client_socket, &operation, sizeof(BlogOperation), 0);
+
+    if (bytes_received == -1) {
+      exit(EXIT_FAILURE);
+    }
+
+    if (operation.operation_type == NEW_POST) {
+      printf("new post added in %s by %.02d\n", operation.topic, operation.client_id);
+    }
+    if (operation.server_response == 1) {
+      printf("%s", operation.content);
+      operation.server_response = 0;
+    }
+
+    if (operation.operation_type == EXIT) {
+      return NULL;
+    }
+  }
+}
+
 void loop(int client_socket) {
   while (true) {
     BlogOperation operation;
-    char line[MAX_CMD_SIZE];
-
     operation.operation_type = UNKNOWN;
 
     if (client_id != 0) {
+      char line[MAX_CMD_SIZE];
+
       fgets(line, MAX_CMD_SIZE, stdin);
 
       // Come a quebra de linha que vem com o fgets
@@ -75,27 +103,19 @@ void loop(int client_socket) {
     if (send(client_socket, &operation, sizeof(BlogOperation), 0) == -1) {
       exit(EXIT_FAILURE);
     }
-    ssize_t bytes_received;
-
-    bytes_received = recv(client_socket, &operation, sizeof(BlogOperation), 0);
-    if (bytes_received == -1) {
-      exit(EXIT_FAILURE);
-    }
-
-    if (client_id == 0) {
-      client_id = operation.client_id;
-    }
-
-    if (operation.operation_type == NEW_POST) {
-      printf("new post added in %s by %.02d\n", operation.topic, operation.client_id);
-    }
-    if (operation.server_response == 1) {
-      printf("%s", operation.content);
-      operation.server_response = 0;
-    }
-
     if (operation.operation_type == EXIT) {
       break;
+    }
+    if (client_id == 0) {
+      void *socket = &client_socket;
+      ssize_t bytes_received = recv(client_socket, &operation, sizeof(BlogOperation), 0);
+
+      if (bytes_received == -1) {
+        exit(EXIT_FAILURE);
+      }
+
+      client_id = operation.client_id;
+      pthread_create(&thread_handle, NULL, listen_to_messages, socket);
     }
   }
 }
@@ -151,6 +171,7 @@ int main(int argc, char *argv[]) {
   }
 
   loop(client_socket);
+  pthread_join(thread_handle, NULL);
 
   close(client_socket);
 }

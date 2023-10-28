@@ -21,7 +21,7 @@
 
 pthread_t thread_pool[THREAD_POOL_SIZE];
 
-bool used_clients[MAX_CLIENTS];
+int used_clients[MAX_CLIENTS];
 LinkedList all_topics;
 LinkedList topics_per_client[MAX_CLIENTS];
 
@@ -42,10 +42,10 @@ int get_protocol(char *string) {
   exit(EXIT_FAILURE);
 }
 
-void new_connection(BlogOperation *operation) {
+void new_connection(BlogOperation *operation, const int *socket) {
   for (int i = 0; i < MAX_CLIENTS; ++i) {
-    if (!used_clients[i]) {
-      used_clients[i] = true;
+    if (used_clients[i] == 0) {
+      used_clients[i] = *socket;
       printf("client %.02d connected\n", i + 1);
       operation->client_id = i + 1;
       return;
@@ -55,7 +55,7 @@ void new_connection(BlogOperation *operation) {
 }
 
 void subscribe(BlogOperation *operation) {
-  LinkedList *topics = &topics_per_client[operation->client_id];
+  LinkedList *topics = &topics_per_client[operation->client_id - 1];
 
   if (all_topics.size == 0) {
     all_topics = create_list(operation->topic);
@@ -75,7 +75,7 @@ void subscribe(BlogOperation *operation) {
 }
 
 void unsubscribe(BlogOperation *operation) {
-  LinkedList *topics = &topics_per_client[operation->client_id];
+  LinkedList *topics = &topics_per_client[operation->client_id - 1];
   NodeTopic *previous_node = NULL;
 
   for (NodeTopic *node = &topics->head; node != NULL; node = node->next) {
@@ -122,12 +122,12 @@ void list_topics(BlogOperation *operation) {
 }
 
 void disconnect_client(BlogOperation *operation) {
-  used_clients[operation->client_id - 1] = false;
-  topics_per_client[operation->client_id] = create_empty_list();
+  used_clients[operation->client_id - 1] = 0;
+  topics_per_client[operation->client_id - 1] = create_empty_list();
   printf("client %.02d disconnected\n", operation->client_id);
 }
 
-void publish(BlogOperation *operation, int client_socket) {
+void publish(BlogOperation *operation) {
   // Insere o tópico se ele estivere ausente
   if (all_topics.size == 0) {
     all_topics = create_list(operation->topic);
@@ -138,15 +138,15 @@ void publish(BlogOperation *operation, int client_socket) {
   printf("new post added in %s by %.02d\n", operation->topic, operation->client_id);
 
   for (int i = 0; i < MAX_CLIENTS; ++i) {
-    if (used_clients[i]) {
-      LinkedList *topics = &topics_per_client[i + 1];
+    if (used_clients[i] > 0) {
+      LinkedList *topics = &topics_per_client[i];
 
       for (NodeTopic *node = &topics->head; node != NULL; node = node->next) {
         if (strcmp(node->topic, operation->topic) == 0) {
 
           operation->server_response = 1;
 
-          if (send(client_socket, operation, sizeof(*operation), 0) == -1) {
+          if (send(used_clients[i], operation, sizeof(BlogOperation), 0) == -1) {
             exit(EXIT_FAILURE);
           }
 
@@ -171,12 +171,12 @@ void *handle_connection(void *socket) {
 
     switch (operation.operation_type) {
     case NEW_POST: {
-      publish(&operation, *client_socket);
+      publish(&operation);
       break;
     }
     case NEW_CONNECTION: {
       pthread_mutex_lock(&mutex_clients);
-      new_connection(&operation);
+      new_connection(&operation, client_socket);
       pthread_mutex_unlock(&mutex_clients);
       break;
     }
@@ -203,9 +203,12 @@ void *handle_connection(void *socket) {
     }
     }
 
-    if (send(*client_socket, &operation, sizeof(operation), 0) == -1) {
-      free(socket);
-      exit(EXIT_FAILURE);
+    if (operation.operation_type == NEW_CONNECTION || operation.operation_type == LIST_TOPICS ||
+        operation.operation_type == EXIT) {
+      if (send(*client_socket, &operation, sizeof(BlogOperation), 0) == -1) {
+        free(socket);
+        exit(EXIT_FAILURE);
+      }
     }
 
     if (operation.operation_type == EXIT) {
@@ -216,7 +219,7 @@ void *handle_connection(void *socket) {
   }
 }
 
-void *thread_function(void *arg) {
+void *thread_function(void * /*unused*/) {
   pthread_detach(pthread_self());
 
   while (true) {
@@ -242,7 +245,7 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  memset(used_clients, false, sizeof(bool) * MAX_CLIENTS);
+  memset(used_clients, 0, sizeof(int) * MAX_CLIENTS);
 
   for (int i = 0; i < THREAD_POOL_SIZE - 1; ++i) {
     pthread_create(&thread_pool[i], NULL, thread_function, NULL);
