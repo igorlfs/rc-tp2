@@ -206,8 +206,7 @@ void *handle_connection(void *socket) {
     }
     }
 
-    if (operation.operation_type == NEW_CONNECTION || operation.operation_type == LIST_TOPICS ||
-        operation.operation_type == EXIT) {
+    if (operation.operation_type != UNSUBSCRIBE && operation.operation_type != NEW_POST) {
       if (send(*client_socket, &operation, sizeof(BlogOperation), 0) == -1) {
         free(socket);
         exit(EXIT_FAILURE);
