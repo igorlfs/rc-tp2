@@ -30,18 +30,6 @@ pthread_mutex_t mutex_threads = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_clients = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_all_topics = PTHREAD_MUTEX_INITIALIZER;
 
-void new_connection(BlogOperation *operation) {
-  for (int i = 0; i < MAX_CLIENTS; ++i) {
-    if (!used_clients[i]) {
-      used_clients[i] = true;
-      printf("client %.02d connected\n", i + 1);
-      operation->client_id = i + 1;
-      return;
-    }
-  }
-  exit(EXIT_FAILURE);
-}
-
 /// Retorna o protocolo com base em `string` ou interrompe o programa
 /// caso a string não seja reconhecida.
 int get_protocol(char *string) {
@@ -50,6 +38,18 @@ int get_protocol(char *string) {
   }
   if (strcmp(string, "v6") == 0) {
     return AF_INET6;
+  }
+  exit(EXIT_FAILURE);
+}
+
+void new_connection(BlogOperation *operation) {
+  for (int i = 0; i < MAX_CLIENTS; ++i) {
+    if (!used_clients[i]) {
+      used_clients[i] = true;
+      printf("client %.02d connected\n", i + 1);
+      operation->client_id = i + 1;
+      return;
+    }
   }
   exit(EXIT_FAILURE);
 }
@@ -84,7 +84,9 @@ void unsubscribe(BlogOperation *operation) {
 
       if (previous_node != NULL) {
         previous_node->next = node->next;
+        free(node);
       } else if (topics->size != 0) {
+        free(previous_node);
         topics->head = *topics->head.next;
       }
 
