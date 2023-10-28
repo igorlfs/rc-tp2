@@ -42,6 +42,14 @@ int get_protocol(char *string) {
   exit(EXIT_FAILURE);
 }
 
+void create_topic(BlogOperation *operation) {
+  if (all_topics.size == 0) {
+    all_topics = create_list(operation->topic);
+  } else {
+    insert_in_list(&all_topics, operation->topic);
+  }
+}
+
 void new_connection(BlogOperation *operation, const int *socket) {
   for (int i = 0; i < MAX_CLIENTS; ++i) {
     if (used_clients[i] == 0) {
@@ -56,12 +64,6 @@ void new_connection(BlogOperation *operation, const int *socket) {
 
 void subscribe(BlogOperation *operation) {
   LinkedList *topics = &topics_per_client[operation->client_id - 1];
-
-  if (all_topics.size == 0) {
-    all_topics = create_list(operation->topic);
-  } else {
-    insert_in_list(&all_topics, operation->topic);
-  }
 
   if (topics->size == 0) {
     *topics = create_list(operation->topic);
@@ -128,13 +130,6 @@ void disconnect_client(BlogOperation *operation) {
 }
 
 void publish(BlogOperation *operation) {
-  // Insere o tópico se ele estivere ausente
-  if (all_topics.size == 0) {
-    all_topics = create_list(operation->topic);
-  } else {
-    insert_in_list(&all_topics, operation->topic);
-  }
-
   printf("new post added in %s by %.02d\n", operation->topic, operation->client_id);
 
   for (int i = 0; i < MAX_CLIENTS; ++i) {
@@ -171,7 +166,13 @@ void *handle_connection(void *socket) {
 
     switch (operation.operation_type) {
     case NEW_POST: {
+      pthread_mutex_lock(&mutex_all_topics);
+      create_topic(&operation);
+      pthread_mutex_unlock(&mutex_all_topics);
+
+      pthread_mutex_lock(&mutex_clients);
       publish(&operation);
+      pthread_mutex_unlock(&mutex_clients);
       break;
     }
     case NEW_CONNECTION: {
@@ -182,8 +183,10 @@ void *handle_connection(void *socket) {
     }
     case SUBSCRIBE: {
       pthread_mutex_lock(&mutex_all_topics);
-      subscribe(&operation);
+      create_topic(&operation);
       pthread_mutex_unlock(&mutex_all_topics);
+
+      subscribe(&operation);
       break;
     }
     case UNSUBSCRIBE:
