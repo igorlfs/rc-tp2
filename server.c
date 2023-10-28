@@ -1,6 +1,7 @@
 #include "common.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,10 +17,18 @@
 #define MAX_PENDING 20
 
 #define MAX_CLIENTS 10
+#define THREAD_POOL_SIZE 10
+
+pthread_t thread_pool[THREAD_POOL_SIZE];
 
 bool used_clients[MAX_CLIENTS];
 LinkedList all_topics;
 LinkedList topics_per_client[MAX_CLIENTS];
+
+pthread_cond_t condition_var = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t mutex_threads = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_clients = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_all_topics = PTHREAD_MUTEX_INITIALIZER;
 
 void new_connection(BlogOperation *operation) {
   for (int i = 0; i < MAX_CLIENTS; ++i) {
@@ -132,13 +141,94 @@ void publish(BlogOperation *operation, int client_socket) {
 
       for (NodeTopic *node = &topics->head; node != NULL; node = node->next) {
         if (strcmp(node->topic, operation->topic) == 0) {
+
           operation->server_response = 1;
+
           if (send(client_socket, operation, sizeof(*operation), 0) == -1) {
             exit(EXIT_FAILURE);
           }
+
           break;
         }
       }
+    }
+  }
+}
+
+void *handle_connection(void *socket) {
+  int *client_socket = (int *)socket;
+
+  while (true) {
+    BlogOperation operation;
+    ssize_t bytes_received = recv(*client_socket, &operation, sizeof(operation), 0);
+
+    if (bytes_received == -1) {
+      free(socket);
+      exit(EXIT_FAILURE);
+    }
+
+    switch (operation.operation_type) {
+    case NEW_POST: {
+      publish(&operation, *client_socket);
+      break;
+    }
+    case NEW_CONNECTION: {
+      pthread_mutex_lock(&mutex_clients);
+      new_connection(&operation);
+      pthread_mutex_unlock(&mutex_clients);
+      break;
+    }
+    case SUBSCRIBE: {
+      pthread_mutex_lock(&mutex_all_topics);
+      subscribe(&operation);
+      pthread_mutex_unlock(&mutex_all_topics);
+      break;
+    }
+    case UNSUBSCRIBE:
+      unsubscribe(&operation);
+      break;
+    case LIST_TOPICS: {
+      pthread_mutex_lock(&mutex_all_topics);
+      list_topics(&operation);
+      pthread_mutex_unlock(&mutex_all_topics);
+      break;
+    }
+    case EXIT: {
+      pthread_mutex_lock(&mutex_clients);
+      disconnect_client(&operation);
+      pthread_mutex_unlock(&mutex_clients);
+      break;
+    }
+    }
+
+    if (send(*client_socket, &operation, sizeof(operation), 0) == -1) {
+      free(socket);
+      exit(EXIT_FAILURE);
+    }
+
+    if (operation.operation_type == EXIT) {
+      close(*client_socket);
+      free(socket);
+      return NULL;
+    }
+  }
+}
+
+void *thread_function(void *arg) {
+  pthread_detach(pthread_self());
+
+  while (true) {
+    pthread_mutex_lock(&mutex_threads);
+    int *p_client;
+
+    if ((p_client = dequeue()) == NULL) {
+      pthread_cond_wait(&condition_var, &mutex_threads);
+      p_client = dequeue();
+    };
+
+    pthread_mutex_unlock(&mutex_threads);
+    if (p_client != NULL) {
+      handle_connection(p_client);
     }
   }
 }
@@ -148,6 +238,12 @@ int main(int argc, char *argv[]) {
   // Garante a quantidade de argumentos para o programa funcionar
   if (argc < ARG_PORT) {
     exit(EXIT_FAILURE);
+  }
+
+  memset(used_clients, false, sizeof(bool) * MAX_CLIENTS);
+
+  for (int i = 0; i < THREAD_POOL_SIZE - 1; ++i) {
+    pthread_create(&thread_pool[i], NULL, thread_function, NULL);
   }
 
   int port = atoi(argv[ARG_PORT]);
@@ -182,9 +278,6 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  memset(used_clients, false, sizeof(bool) * MAX_CLIENTS);
-
-  int client_socket;
   struct sockaddr_storage client_address_storage;
   void *client_addr;
   if (protocol == AF_INET) {
@@ -194,54 +287,24 @@ int main(int argc, char *argv[]) {
   }
   socklen_t client_addr_len = sizeof(client_addr);
 
-reconnect:
-
   // Esperando conexão do cliente
   if (listen(server_socket, MAX_PENDING) == -1) {
     exit(EXIT_FAILURE);
   }
 
-  // Aceitando conexão do cliente
-  client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
-  if (client_socket == -1) {
-    exit(EXIT_FAILURE);
-  }
-
   while (true) {
-    BlogOperation operation;
-    ssize_t bytes_received = recv(client_socket, &operation, sizeof(operation), 0);
-    if (bytes_received == -1) {
+    int *p_client = malloc(sizeof(int));
+    int client_socket;
+
+    client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
+    if (client_socket == -1) {
       exit(EXIT_FAILURE);
     }
 
-    switch (operation.operation_type) {
-    case NEW_POST:
-      publish(&operation, client_socket);
-      break;
-    case NEW_CONNECTION:
-      new_connection(&operation);
-      break;
-    case SUBSCRIBE:
-      subscribe(&operation);
-      break;
-    case UNSUBSCRIBE:
-      unsubscribe(&operation);
-      break;
-    case LIST_TOPICS:
-      list_topics(&operation);
-      break;
-    case EXIT:
-      disconnect_client(&operation);
-      break;
-    }
-
-    if (send(client_socket, &operation, sizeof(operation), 0) == -1) {
-      exit(EXIT_FAILURE);
-    }
-
-    if (operation.operation_type == EXIT) {
-      close(client_socket);
-      goto reconnect;
-    }
+    *p_client = client_socket;
+    pthread_mutex_lock(&mutex_threads);
+    enqueue(p_client);
+    pthread_cond_signal(&condition_var);
+    pthread_mutex_unlock(&mutex_threads);
   }
 }

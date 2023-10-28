@@ -36,3 +36,38 @@ bool insert_in_list(LinkedList *list, char *topic) {
   }
   return true;
 }
+
+NodeSocket *head = NULL;
+NodeSocket *tail = NULL;
+
+void enqueue(int *client_socket) {
+  NodeSocket *new_node = malloc(sizeof(NodeSocket));
+
+  new_node->client_socket = client_socket;
+  new_node->next = NULL;
+
+  if (tail == NULL) {
+    head = new_node;
+  } else {
+    tail->next = new_node;
+  }
+
+  tail = new_node;
+}
+
+int *dequeue(void) {
+  if (head == NULL) {
+    return NULL;
+  }
+
+  int *result = head->client_socket;
+  NodeSocket *auxiliary = head;
+
+  head = head->next;
+  if (head == NULL) {
+    tail = NULL;
+  }
+
+  free(auxiliary);
+  return result;
+}

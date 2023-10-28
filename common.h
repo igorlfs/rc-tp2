@@ -33,6 +33,14 @@ typedef struct LinkedList {
   int size;
 } LinkedList;
 
+typedef struct NodeSocket {
+  struct NodeSocket *next;
+  int *client_socket;
+} NodeSocket;
+
+void enqueue(int *client_socket);
+int *dequeue(void);
+
 LinkedList create_empty_list(void);
 LinkedList create_list(char *topic);
 bool insert_in_list(LinkedList *list, char *topic);

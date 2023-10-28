@@ -38,6 +38,9 @@ void set_operation_type(char line[MAX_CMD_SIZE], BlogOperation *operation) {
     operation->operation_type = UNSUBSCRIBE;
 
   } else if (strcmp(command, "publish") == 0 && strcmp(strtok(NULL, " "), "in") == 0) {
+    char *topic = strtok(NULL, " ");
+
+    strcpy(operation->topic, topic);
 
     fgets(line, MAX_CMD_SIZE, stdin);
     strcpy(operation->content, line);
