@@ -300,7 +300,6 @@ int main(int argc, char *argv[]) {
   }
 
   while (true) {
-    int *p_client = malloc(sizeof(int));
     int client_socket;
 
     client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
@@ -308,6 +307,7 @@ int main(int argc, char *argv[]) {
       exit(EXIT_FAILURE);
     }
 
+    int *p_client = malloc(sizeof(int));
     *p_client = client_socket;
     pthread_mutex_lock(&mutex_threads);
     enqueue(p_client);

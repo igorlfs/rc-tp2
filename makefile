@@ -1,12 +1,12 @@
 all: init client server
 
-# TODO mudar pra gcc
-CXX=clang
+CXX=gcc
 BIN=bin
 CLN=$(BIN)/client
 SRV=$(BIN)/server
 PORT=51513
-IP=127.0.0.1
+IP=::1
+VERSION=v6
 
 init:
 	@ test -d $(BIN) && true || mkdir $(BIN)
@@ -21,7 +21,7 @@ clean:
 	test ! -d $(BIN) && true || rm -rf $(BIN) 
 
 run_server: init server
-	./$(SRV) v4 $(PORT)
+	./$(SRV) $(VERSION) $(PORT)
 
 run_client: init client
 	./$(CLN) $(IP) $(PORT)
