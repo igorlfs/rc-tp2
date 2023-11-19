@@ -4,7 +4,7 @@ CXX=gcc
 BIN=bin
 CLN=$(BIN)/client
 SRV=$(BIN)/server
-PORT=51513
+PORT=51511
 IP=::1
 VERSION=v6
 
